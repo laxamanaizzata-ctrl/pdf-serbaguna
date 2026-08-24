@@ -1,4 +1,4 @@
-# PDF Serbaguna v3 — Siap GitHub Pages
+# PDF Serbaguna v4 — Siap GitHub Pages
 
 Web gratis untuk konversi, pengaturan, penyuntingan dasar, dan keamanan PDF langsung di browser.
 
@@ -84,3 +84,29 @@ Batasan:
 - Tidak berlaku untuk PDF scan/foto tanpa OCR.
 - PDF dapat memecah satu kalimat menjadi beberapa objek teks; bila frasa panjang tidak ditemukan, coba cari bagian kata yang lebih pendek.
 - Metode ini menutup tampilan teks lama dan menulis teks baru. Untuk penyuntingan struktur konten PDF tingkat lanjut seperti aplikasi desktop penuh, diperlukan engine PDF yang lebih kompleks.
+
+
+## Visual PDF Editor v4
+
+Menu **Edit PDF Visual** membuka dokumen dalam editor besar langsung di browser.
+
+Fitur:
+- Sidebar thumbnail halaman.
+- Klik blok teks digital langsung pada halaman untuk mengubahnya.
+- Kotak edit muncul tepat pada posisi teks.
+- Hapus teks langsung dari kotak edit.
+- Tambah teks dengan klik area halaman.
+- Undo / Redo.
+- Navigasi halaman.
+- Zoom 60%–250%.
+- Preview perubahan sebelum menyimpan.
+- Simpan sebagai PDF baru.
+
+Cara kerja:
+PDF asli tetap menjadi latar. Ketika teks diubah, aplikasi menutup area teks lama dan menulis teks pengganti pada koordinat yang sama saat PDF disimpan.
+
+Batasan versi 4:
+- PDF scan/foto belum dapat diedit sebagai teks tanpa OCR.
+- Font pengganti saat ini memakai Helvetica/Arial sehingga mungkin tidak persis sama dengan font sumber.
+- Teks yang sangat terfragmentasi atau berotasi dapat memiliki area klik yang kurang presisi.
+- Ini adalah visual overlay editor, bukan pengubahan struktur objek font PDF tingkat Acrobat Pro.
