@@ -7,7 +7,63 @@ import * as XLSX from 'xlsx'
 import { Ream } from 'reamkit'
 import { createPdfToolkit } from 'pdfstudio'
 
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
+
+// Safari compatibility:
+// PDF.js 6.x getTextContent() internally uses async iteration over ReadableStream.
+// Stable Safari 26.5 can fail with "undefined is not a function" because
+// ReadableStream[Symbol.asyncIterator] is not available there.
+// Consume streamTextContent() through getReader() instead.
+async function getTextContentCompat(page) {
+  if (!page || typeof page.streamTextContent !== 'function') {
+    return await page.getTextContent()
+  }
+
+  const stream = page.streamTextContent()
+  if (!stream || typeof stream.getReader !== 'function') {
+    return await page.getTextContent()
+  }
+
+  const reader = stream.getReader()
+  const textContent = {
+    items: [],
+    styles: Object.create(null),
+    lang: null
+  }
+
+  try {
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+
+      const value = result.value
+      if (!value) continue
+
+      if (textContent.lang == null && value.lang != null) {
+        textContent.lang = value.lang
+      }
+
+      if (value.styles) {
+        Object.assign(textContent.styles, value.styles)
+      }
+
+      if (value.items && value.items.length) {
+        for (let i = 0; i < value.items.length; i++) {
+          textContent.items.push(value.items[i])
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch (_) {
+      // No-op: older Safari may not require/reliably expose releaseLock.
+    }
+  }
+
+  return textContent
+}
 
 const tools = [
   { id:'word-pdf', title:'Word ke PDF', icon:'W', cat:'convert', desc:'Ubah DOC/DOCX menjadi PDF.', accept:'.doc,.docx' },
@@ -672,7 +728,7 @@ async function pdfToExcel(file) {
   for (let n=1; n<=doc.numPages; n++) {
     setStatus(`Mengekstrak halaman ${n} dari ${doc.numPages}…`)
     const page = await doc.getPage(n)
-    const content = await page.getTextContent()
+    const content = await getTextContentCompat(page)
     const items = content.items
       .filter(i => i.str && i.str.trim())
       .map(i => ({ text:i.str.trim(), x:i.transform[4], y:i.transform[5] }))
@@ -693,142 +749,112 @@ async function pdfToExcel(file) {
 }
 
 async function editPdf(file) {
-  const rawBuffer = await file.arrayBuffer()
-  const bytesForPdfJs = new Uint8Array(rawBuffer.slice(0))
-  const bytesForPdfLib = new Uint8Array(rawBuffer.slice(0))
-
+  const sourceBytes = new Uint8Array(await file.arrayBuffer())
+  const pdf = await PDFDocument.load(sourceBytes)
   const pageNum = Number(modalBody.querySelector('#pageNumber').value || 1) - 1
+  if (pageNum < 0 || pageNum >= pdf.getPageCount()) throw new Error('Nomor halaman tidak valid.')
+
   const action = modalBody.querySelector('#editAction').value
 
   if (action === 'replace-text') {
-    const findText = modalBody.querySelector('#findText').value || ''
-    const replacementText = modalBody.querySelector('#replaceText').value || ''
+    const findText = modalBody.querySelector('#findText').value
+    const replacement = modalBody.querySelector('#replaceText').value
     const scope = modalBody.querySelector('#replaceScope').value
     const caseSensitive = modalBody.querySelector('#replaceCase').value === 'sensitive'
 
     if (!findText.trim()) throw new Error('Masukkan teks lama yang ingin diganti.')
 
-    setStatus('Membaca struktur teks PDF…')
+    const pdfJsDoc = await pdfjsLib.getDocument({ data: sourceBytes }).promise
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const pageIndexes = scope === 'all'
+      ? Array.from({ length: pdf.getPageCount() }, (_, i) => i)
+      : [pageNum]
 
-    // Extract text positions first using PDF.js.
-    const pdfJsDoc = await pdfjsLib.getDocument({ data: bytesForPdfJs }).promise
-    const totalPages = pdfJsDoc.numPages
+    let totalMatches = 0
 
-    if (pageNum < 0 || pageNum >= totalPages) {
-      throw new Error('Nomor halaman tidak valid.')
-    }
-
-    const targets = []
-    if (scope === 'all') {
-      for (let i = 0; i < totalPages; i++) targets.push(i)
-    } else {
-      targets.push(pageNum)
-    }
-
-    const needle = caseSensitive ? findText : findText.toLowerCase()
-    const found = []
-
-    for (let ti = 0; ti < targets.length; ti++) {
-      const idx = targets[ti]
-      setStatus(`Mencari teks pada halaman ${idx + 1}…`)
+    for (const idx of pageIndexes) {
+      setStatus(`Mencari dan mengganti teks pada halaman ${idx + 1}…`)
       const jsPage = await pdfJsDoc.getPage(idx + 1)
-      const textContent = await jsPage.getTextContent()
-      const items = textContent && textContent.items ? textContent.items : []
+      const textContent = await getTextContentCompat(jsPage)
+      const outPage = pdf.getPage(idx)
 
-      // Use classic indexed loops for Safari compatibility.
-      for (let ii = 0; ii < items.length; ii++) {
-        const item = items[ii]
-        if (!item || typeof item.str !== 'string' || !item.str.trim()) continue
+      for (const item of textContent.items) {
+        if (!item.str || !item.str.trim()) continue
 
-        const source = caseSensitive ? item.str : item.str.toLowerCase()
-        let start = source.indexOf(needle)
+        const haystack = caseSensitive ? item.str : item.str.toLowerCase()
+        const needle = caseSensitive ? findText : findText.toLowerCase()
 
+        let start = haystack.indexOf(needle)
         while (start !== -1) {
-          const tr = item.transform || [1, 0, 0, 12, 0, 0]
-          const textLength = Math.max(item.str.length, 1)
-          const totalWidth = Math.max(Number(item.width) || 0, 1)
-          const rawHeight = Math.abs(Number(item.height) || 0)
-          const transformHeight = Math.abs(Number(tr[3]) || 0)
-          const fontSize = Math.max(6, Math.min(72, transformHeight || rawHeight || 12))
+          const textLen = Math.max(item.str.length, 1)
+          const itemWidth = Math.max(Number(item.width) || 0, 1)
+          const ratioStart = start / textLen
+          const ratioWidth = findText.length / textLen
 
-          found.push({
-            pageIndex: idx,
-            x: Number(tr[4]) || 0,
-            baselineY: Number(tr[5]) || 0,
-            itemWidth: totalWidth,
-            itemTextLength: textLength,
-            matchStart: start,
-            matchLength: findText.length,
-            fontSize: fontSize,
-            itemHeight: Math.max(rawHeight, fontSize)
+          const x = item.transform?.[4] ?? 0
+          const baselineY = item.transform?.[5] ?? 0
+          const fontSize = Math.max(
+            6,
+            Math.min(
+              72,
+              Math.abs(item.transform?.[3] || 0) ||
+              Math.abs(item.height || 0) ||
+              12
+            )
+          )
+
+          const oldX = x + itemWidth * ratioStart
+          const oldWidth = Math.max(itemWidth * ratioWidth, fontSize * 0.45)
+          const oldHeight = Math.max(Math.abs(item.height || 0), fontSize * 1.05)
+
+          // Calculate a replacement size that tries to fit the old text box.
+          let drawSize = fontSize
+          let replacementWidth = font.widthOfTextAtSize(replacement, drawSize)
+          if (replacementWidth > oldWidth && replacement.length > 0) {
+            drawSize = Math.max(5, drawSize * (oldWidth / replacementWidth))
+            replacementWidth = font.widthOfTextAtSize(replacement, drawSize)
+          }
+
+          // White-out the existing visual text, then draw replacement text.
+          // A small padding helps cover antialiasing around glyph edges.
+          outPage.drawRectangle({
+            x: Math.max(0, oldX - 1.5),
+            y: Math.max(0, baselineY - oldHeight * 0.22),
+            width: Math.max(oldWidth + 3, replacementWidth + 3),
+            height: oldHeight * 1.15,
+            color: rgb(1, 1, 1),
           })
 
-          start = source.indexOf(needle, start + Math.max(needle.length, 1))
+          if (replacement) {
+            outPage.drawText(replacement, {
+              x: oldX,
+              y: baselineY,
+              size: drawSize,
+              font,
+              color: rgb(0, 0, 0),
+            })
+          }
+
+          totalMatches++
+          start = haystack.indexOf(needle, start + Math.max(needle.length, 1))
         }
       }
     }
 
-    if (!found.length) {
+    if (!totalMatches) {
       throw new Error(
-        'Teks tidak ditemukan sebagai satu objek teks digital. Coba cari satu kata yang lebih pendek. Jika PDF berasal dari scan/foto, diperlukan OCR.'
+        'Teks tidak ditemukan sebagai objek teks digital. Coba potongan kata yang lebih pendek. Jika PDF berupa scan/foto, diperlukan OCR.'
       )
     }
 
-    setStatus(`Ditemukan ${found.length} kemunculan. Menulis perubahan…`)
-
-    // Open a separate untouched copy with pdf-lib.
-    const pdf = await PDFDocument.load(bytesForPdfLib)
-    const font = await pdf.embedFont(StandardFonts.Helvetica)
-
-    for (let fi = 0; fi < found.length; fi++) {
-      const hit = found[fi]
-      const outPage = pdf.getPage(hit.pageIndex)
-
-      const ratioStart = hit.matchStart / hit.itemTextLength
-      const ratioWidth = hit.matchLength / hit.itemTextLength
-      const oldX = hit.x + hit.itemWidth * ratioStart
-      const oldWidth = Math.max(hit.itemWidth * ratioWidth, hit.fontSize * 0.45)
-      const oldHeight = Math.max(hit.itemHeight, hit.fontSize * 1.05)
-
-      let drawSize = hit.fontSize
-      let replacementWidth = 0
-
-      if (replacementText) {
-        replacementWidth = font.widthOfTextAtSize(replacementText, drawSize)
-        if (replacementWidth > oldWidth) {
-          drawSize = Math.max(5, drawSize * (oldWidth / replacementWidth))
-          replacementWidth = font.widthOfTextAtSize(replacementText, drawSize)
-        }
-      }
-
-      outPage.drawRectangle({
-        x: Math.max(0, oldX - 1.5),
-        y: Math.max(0, hit.baselineY - oldHeight * 0.22),
-        width: Math.max(oldWidth + 3, replacementWidth + 3),
-        height: oldHeight * 1.15,
-        color: rgb(1, 1, 1)
-      })
-
-      if (replacementText) {
-        outPage.drawText(replacementText, {
-          x: oldX,
-          y: hit.baselineY,
-          size: drawSize,
-          font: font,
-          color: rgb(0, 0, 0)
-        })
-      }
-    }
-
-    const saved = await pdf.save()
-    downloadBytes(saved, `${stripExt(file.name)}-teks-diubah.pdf`, 'application/pdf')
-    setStatus(`Selesai. <strong>${found.length}</strong> kemunculan teks berhasil diganti.`, 'success')
+    downloadBytes(
+      await pdf.save(),
+      `${stripExt(file.name)}-teks-diubah.pdf`,
+      'application/pdf'
+    )
+    setStatus(`Selesai. <strong>${totalMatches}</strong> kemunculan teks berhasil diganti.`, 'success')
     return
   }
-
-  // Other edit actions.
-  const pdf = await PDFDocument.load(bytesForPdfLib)
-  if (pageNum < 0 || pageNum >= pdf.getPageCount()) throw new Error('Nomor halaman tidak valid.')
 
   if (action === 'delete') {
     if (pdf.getPageCount() <= 1) throw new Error('PDF satu halaman tidak dapat dihapus seluruhnya.')
@@ -839,15 +865,15 @@ async function editPdf(file) {
     const current = page.getRotation().angle || 0
     page.setRotation(degrees((current + add) % 360))
   } else {
-    const newText = modalBody.querySelector('#editText').value.trim()
-    if (!newText) throw new Error('Masukkan teks yang akan ditambahkan.')
+    const text = modalBody.querySelector('#editText').value.trim()
+    if (!text) throw new Error('Masukkan teks yang akan ditambahkan.')
     const page = pdf.getPage(pageNum)
     const font = await pdf.embedFont(StandardFonts.Helvetica)
     const size = Number(modalBody.querySelector('#fontSize').value || 18)
     const x = Number(modalBody.querySelector('#posX').value || 50)
     const topY = Number(modalBody.querySelector('#posY').value || 50)
     const y = page.getHeight() - topY - size
-    page.drawText(newText, { x, y, size, font, color:rgb(0,0,0) })
+    page.drawText(text, { x, y, size, font, color:rgb(0,0,0) })
   }
 
   downloadBytes(await pdf.save(), `${stripExt(file.name)}-edit.pdf`, 'application/pdf')
