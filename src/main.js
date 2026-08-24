@@ -23,7 +23,7 @@ const tools = [
   { id:'reorder', title:'Atur Halaman PDF', icon:'↕', cat:'organize', desc:'Susun ulang atau buang halaman dengan thumbnail visual.', accept:'.pdf,application/pdf' },
   { id:'compress', title:'Kompres PDF', icon:'ZIP', cat:'organize', desc:'Kompresi lossless dan optimasi struktur PDF.', accept:'.pdf,application/pdf' },
 
-  { id:'edit', title:'Edit PDF Dasar', icon:'✎', cat:'edit', desc:'Tambah teks, rotasi halaman, atau hapus halaman.', accept:'.pdf,application/pdf' },
+  { id:'edit', title:'Edit & Ganti Teks PDF', icon:'✎', cat:'edit', desc:'Ganti teks yang ada, tambah teks, rotasi, atau hapus halaman.', accept:'.pdf,application/pdf' },
   { id:'watermark', title:'Watermark PDF', icon:'WM', cat:'edit', desc:'Tambahkan watermark teks transparan pada semua halaman.', accept:'.pdf,application/pdf' },
   { id:'page-numbers', title:'Nomor Halaman', icon:'#', cat:'edit', desc:'Tambahkan nomor halaman di posisi pilihan.', accept:'.pdf,application/pdf' },
   { id:'sign', title:'Tanda Tangan PDF', icon:'✍', cat:'edit', desc:'Tempel tanda tangan PNG/JPG ke halaman tertentu.', accept:'.pdf,application/pdf' },
@@ -123,6 +123,7 @@ function toolExtra(id) {
     <div class="form-grid">
       <label>Aksi
         <select id="editAction">
+          <option value="replace-text">Ganti teks yang ada</option>
           <option value="add-text">Tambah teks</option>
           <option value="rotate">Rotasi halaman</option>
           <option value="delete">Hapus halaman</option>
@@ -130,7 +131,35 @@ function toolExtra(id) {
       </label>
       <label>Nomor halaman<input id="pageNumber" type="number" min="1" value="1" /></label>
     </div>
-    <div id="addTextFields" class="form-grid">
+
+    <div id="replaceTextFields">
+      <div class="form-grid">
+        <label class="span-2">Cari teks lama
+          <input id="findText" type="text" placeholder="Contoh: Nama Lama" />
+        </label>
+        <label class="span-2">Ganti menjadi
+          <input id="replaceText" type="text" placeholder="Contoh: Nama Baru" />
+        </label>
+        <label>Cakupan
+          <select id="replaceScope">
+            <option value="page">Hanya halaman yang dipilih</option>
+            <option value="all">Semua halaman</option>
+          </select>
+        </label>
+        <label>Kecocokan
+          <select id="replaceCase">
+            <option value="insensitive">Abaikan huruf besar/kecil</option>
+            <option value="sensitive">Harus sama persis</option>
+          </select>
+        </label>
+      </div>
+      <p class="small-note">
+        Fitur ini mencari teks digital pada PDF, menutup teks lama, lalu menulis teks baru pada posisi yang sama.
+        PDF hasil scan/foto belum dapat diubah tanpa OCR.
+      </p>
+    </div>
+
+    <div id="addTextFields" class="form-grid" hidden>
       <label class="span-2">Teks<input id="editText" type="text" placeholder="Teks yang akan ditambahkan" /></label>
       <label>Jarak dari kiri (pt)<input id="posX" type="number" value="50" /></label>
       <label>Jarak dari atas (pt)<input id="posY" type="number" value="50" /></label>
@@ -340,6 +369,7 @@ function setupToolControls(id) {
   if (id === 'edit') {
     const action = modalBody.querySelector('#editAction')
     const update = () => {
+      modalBody.querySelector('#replaceTextFields').hidden = action.value !== 'replace-text'
       modalBody.querySelector('#addTextFields').hidden = action.value !== 'add-text'
       modalBody.querySelector('#rotateFields').hidden = action.value !== 'rotate'
     }
@@ -663,11 +693,113 @@ async function pdfToExcel(file) {
 }
 
 async function editPdf(file) {
-  const pdf = await PDFDocument.load(await file.arrayBuffer())
+  const sourceBytes = new Uint8Array(await file.arrayBuffer())
+  const pdf = await PDFDocument.load(sourceBytes)
   const pageNum = Number(modalBody.querySelector('#pageNumber').value || 1) - 1
   if (pageNum < 0 || pageNum >= pdf.getPageCount()) throw new Error('Nomor halaman tidak valid.')
 
   const action = modalBody.querySelector('#editAction').value
+
+  if (action === 'replace-text') {
+    const findText = modalBody.querySelector('#findText').value
+    const replacement = modalBody.querySelector('#replaceText').value
+    const scope = modalBody.querySelector('#replaceScope').value
+    const caseSensitive = modalBody.querySelector('#replaceCase').value === 'sensitive'
+
+    if (!findText.trim()) throw new Error('Masukkan teks lama yang ingin diganti.')
+
+    const pdfJsDoc = await pdfjsLib.getDocument({ data: sourceBytes }).promise
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const pageIndexes = scope === 'all'
+      ? Array.from({ length: pdf.getPageCount() }, (_, i) => i)
+      : [pageNum]
+
+    let totalMatches = 0
+
+    for (const idx of pageIndexes) {
+      setStatus(`Mencari dan mengganti teks pada halaman ${idx + 1}…`)
+      const jsPage = await pdfJsDoc.getPage(idx + 1)
+      const textContent = await jsPage.getTextContent()
+      const outPage = pdf.getPage(idx)
+
+      for (const item of textContent.items) {
+        if (!item.str || !item.str.trim()) continue
+
+        const haystack = caseSensitive ? item.str : item.str.toLowerCase()
+        const needle = caseSensitive ? findText : findText.toLowerCase()
+
+        let start = haystack.indexOf(needle)
+        while (start !== -1) {
+          const textLen = Math.max(item.str.length, 1)
+          const itemWidth = Math.max(Number(item.width) || 0, 1)
+          const ratioStart = start / textLen
+          const ratioWidth = findText.length / textLen
+
+          const x = item.transform?.[4] ?? 0
+          const baselineY = item.transform?.[5] ?? 0
+          const fontSize = Math.max(
+            6,
+            Math.min(
+              72,
+              Math.abs(item.transform?.[3] || 0) ||
+              Math.abs(item.height || 0) ||
+              12
+            )
+          )
+
+          const oldX = x + itemWidth * ratioStart
+          const oldWidth = Math.max(itemWidth * ratioWidth, fontSize * 0.45)
+          const oldHeight = Math.max(Math.abs(item.height || 0), fontSize * 1.05)
+
+          // Calculate a replacement size that tries to fit the old text box.
+          let drawSize = fontSize
+          let replacementWidth = font.widthOfTextAtSize(replacement, drawSize)
+          if (replacementWidth > oldWidth && replacement.length > 0) {
+            drawSize = Math.max(5, drawSize * (oldWidth / replacementWidth))
+            replacementWidth = font.widthOfTextAtSize(replacement, drawSize)
+          }
+
+          // White-out the existing visual text, then draw replacement text.
+          // A small padding helps cover antialiasing around glyph edges.
+          outPage.drawRectangle({
+            x: Math.max(0, oldX - 1.5),
+            y: Math.max(0, baselineY - oldHeight * 0.22),
+            width: Math.max(oldWidth + 3, replacementWidth + 3),
+            height: oldHeight * 1.15,
+            color: rgb(1, 1, 1),
+          })
+
+          if (replacement) {
+            outPage.drawText(replacement, {
+              x: oldX,
+              y: baselineY,
+              size: drawSize,
+              font,
+              color: rgb(0, 0, 0),
+            })
+          }
+
+          totalMatches++
+          start = haystack.indexOf(needle, start + Math.max(needle.length, 1))
+        }
+      }
+    }
+
+    if (!totalMatches) {
+      throw new Error(
+        'Teks tidak ditemukan sebagai objek teks digital. Coba potongan kata yang lebih pendek. Jika PDF berupa scan/foto, diperlukan OCR.'
+      )
+    }
+
+    downloadBytes(
+      await pdf.save(),
+      `${stripExt(file.name)}-teks-diubah.pdf`,
+      'application/pdf'
+    )
+    setStatus(`Selesai. <strong>${totalMatches}</strong> kemunculan teks berhasil diganti.`, 'success')
+    return
+  }
+
   if (action === 'delete') {
     if (pdf.getPageCount() <= 1) throw new Error('PDF satu halaman tidak dapat dihapus seluruhnya.')
     pdf.removePage(pageNum)
