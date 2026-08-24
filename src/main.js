@@ -79,7 +79,7 @@ const tools = [
   { id:'reorder', title:'Atur Halaman PDF', icon:'↕', cat:'organize', desc:'Susun ulang atau buang halaman dengan thumbnail visual.', accept:'.pdf,application/pdf' },
   { id:'compress', title:'Kompres PDF', icon:'ZIP', cat:'organize', desc:'Kompresi lossless dan optimasi struktur PDF.', accept:'.pdf,application/pdf' },
 
-  { id:'edit', title:'Edit & Ganti Teks PDF', icon:'✎', cat:'edit', desc:'Ganti teks yang ada, tambah teks, rotasi, atau hapus halaman.', accept:'.pdf,application/pdf' },
+  { id:'edit', title:'Edit PDF Visual', icon:'✎', cat:'edit', desc:'Buka PDF seperti editor; klik teks langsung untuk mengubahnya atau tambahkan teks baru.', accept:'.pdf,application/pdf' },
   { id:'watermark', title:'Watermark PDF', icon:'WM', cat:'edit', desc:'Tambahkan watermark teks transparan pada semua halaman.', accept:'.pdf,application/pdf' },
   { id:'page-numbers', title:'Nomor Halaman', icon:'#', cat:'edit', desc:'Tambahkan nomor halaman di posisi pilihan.', accept:'.pdf,application/pdf' },
   { id:'sign', title:'Tanda Tangan PDF', icon:'✍', cat:'edit', desc:'Tempel tanda tangan PNG/JPG ke halaman tertentu.', accept:'.pdf,application/pdf' },
@@ -105,6 +105,21 @@ let activeTool = null
 let activeFiles = []
 let reorderedPages = []
 let thumbnailGeneration = 0
+
+let visualEditorState = {
+  doc: null,
+  sourceBytes: null,
+  pageIndex: 0,
+  zoom: 1.25,
+  mode: 'select',
+  operations: [],
+  undoStack: [],
+  redoStack: [],
+  selectedKey: null,
+  renderToken: 0,
+  currentViewport: null,
+  currentTextItems: []
+}
 
 function renderTools() {
   const q = searchTool.value.trim().toLowerCase()
@@ -176,60 +191,63 @@ function toolExtra(id) {
     <p class="small-note">Fitur ini tidak menebak atau membobol password. Password yang sah wajib diketahui.</p>`
 
   if (id === 'edit') return `
-    <div class="form-grid">
-      <label>Aksi
-        <select id="editAction">
-          <option value="replace-text">Ganti teks yang ada</option>
-          <option value="add-text">Tambah teks</option>
-          <option value="rotate">Rotasi halaman</option>
-          <option value="delete">Hapus halaman</option>
-        </select>
-      </label>
-      <label>Nomor halaman<input id="pageNumber" type="number" min="1" value="1" /></label>
-    </div>
+    <div id="visualEditor" class="visual-editor" hidden>
+      <div class="visual-editor-toolbar">
+        <div class="visual-toolbar-group">
+          <button id="veSelectMode" class="ve-tool active" type="button" title="Klik teks lalu ubah">↖ <span>Edit teks</span></button>
+          <button id="veAddTextMode" class="ve-tool" type="button" title="Klik pada halaman untuk menambah teks">T+ <span>Tambah teks</span></button>
+        </div>
 
-    <div id="replaceTextFields">
-      <div class="form-grid">
-        <label class="span-2">Cari teks lama
-          <input id="findText" type="text" placeholder="Contoh: Nama Lama" />
-        </label>
-        <label class="span-2">Ganti menjadi
-          <input id="replaceText" type="text" placeholder="Contoh: Nama Baru" />
-        </label>
-        <label>Cakupan
-          <select id="replaceScope">
-            <option value="page">Hanya halaman yang dipilih</option>
-            <option value="all">Semua halaman</option>
-          </select>
-        </label>
-        <label>Kecocokan
-          <select id="replaceCase">
-            <option value="insensitive">Abaikan huruf besar/kecil</option>
-            <option value="sensitive">Harus sama persis</option>
-          </select>
-        </label>
+        <div class="visual-toolbar-group">
+          <button id="veUndo" class="ve-icon-btn" type="button" title="Undo" disabled>↶</button>
+          <button id="veRedo" class="ve-icon-btn" type="button" title="Redo" disabled>↷</button>
+        </div>
+
+        <div class="visual-toolbar-group">
+          <button id="vePrevPage" class="ve-icon-btn" type="button" title="Halaman sebelumnya">‹</button>
+          <span id="vePageInfo" class="ve-page-info">Hal. 1 / 1</span>
+          <button id="veNextPage" class="ve-icon-btn" type="button" title="Halaman berikutnya">›</button>
+        </div>
+
+        <div class="visual-toolbar-group">
+          <button id="veZoomOut" class="ve-icon-btn" type="button" title="Perkecil">−</button>
+          <span id="veZoomLabel" class="ve-zoom-label">125%</span>
+          <button id="veZoomIn" class="ve-icon-btn" type="button" title="Perbesar">+</button>
+        </div>
+
+        <div class="visual-toolbar-spacer"></div>
+        <button id="veSavePdf" class="ve-save-btn" type="button">Simpan PDF</button>
       </div>
-      <p class="small-note">
-        Fitur ini mencari teks digital pada PDF, menutup teks lama, lalu menulis teks baru pada posisi yang sama.
-        PDF hasil scan/foto belum dapat diubah tanpa OCR.
-      </p>
-    </div>
 
-    <div id="addTextFields" class="form-grid" hidden>
-      <label class="span-2">Teks<input id="editText" type="text" placeholder="Teks yang akan ditambahkan" /></label>
-      <label>Jarak dari kiri (pt)<input id="posX" type="number" value="50" /></label>
-      <label>Jarak dari atas (pt)<input id="posY" type="number" value="50" /></label>
-      <label>Ukuran font<input id="fontSize" type="number" min="6" max="96" value="18" /></label>
+      <div class="visual-editor-main">
+        <aside class="visual-sidebar">
+          <div class="visual-sidebar-title">HALAMAN</div>
+          <div id="veThumbnails" class="visual-thumbnails"></div>
+        </aside>
+
+        <section class="visual-workspace">
+          <div class="visual-help" id="veHelp">
+            Klik tulisan pada PDF untuk mengubahnya langsung. Pilih <strong>Tambah teks</strong> lalu klik area kosong untuk menambahkan tulisan.
+          </div>
+          <div id="veStageScroll" class="visual-stage-scroll">
+            <div id="veStage" class="visual-stage">
+              <canvas id="veCanvas"></canvas>
+              <div id="veTextLayer" class="visual-text-layer"></div>
+              <div id="veOpsLayer" class="visual-ops-layer"></div>
+              <div id="veInlineLayer" class="visual-inline-layer"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="visual-editor-footer">
+        <span id="veStatus">Belum ada perubahan.</span>
+        <span>PDF scan/foto memerlukan OCR agar teks dapat diklik.</span>
+      </div>
     </div>
-    <div id="rotateFields" class="form-grid" hidden>
-      <label>Derajat
-        <select id="rotation">
-          <option value="90">90°</option>
-          <option value="180">180°</option>
-          <option value="270">270°</option>
-        </select>
-      </label>
-    </div>`
+    <p id="visualEditorIntro" class="small-note">
+      Setelah PDF dipilih, editor akan terbuka di bawah. Untuk PDF digital, klik langsung tulisan yang ingin diubah.
+    </p>`
 
   if (id === 'watermark') return `
     <div class="form-grid">
@@ -319,10 +337,13 @@ function openTool(id) {
   statusBox.hidden = true
   statusBox.className = 'status'
 
+  const modalCard = document.querySelector('.modal-card')
+  if (modalCard) modalCard.classList.toggle('visual-mode', id === 'edit')
+
   modalBody.innerHTML = `
     ${filePicker(activeTool)}
     ${toolExtra(id)}
-    <button id="processBtn" class="primary-btn">Proses sekarang</button>
+    ${id === 'edit' ? '' : '<button id="processBtn" class="primary-btn">Proses sekarang</button>'}
   `
 
   setupFilePicker()
@@ -360,6 +381,12 @@ async function acceptFiles(files) {
   }
   activeFiles = activeTool.multiple ? accepted : accepted.slice(0,1)
   renderFileList()
+
+  if (activeTool.id === 'edit' && activeFiles[0] && isPdf(activeFiles[0])) {
+    hidePreview()
+    await launchVisualEditor(activeFiles[0])
+    return
+  }
 
   const shouldPreviewPdf = activeFiles[0] && isPdf(activeFiles[0]) &&
     !['unlock','lock'].includes(activeTool.id)
@@ -423,14 +450,7 @@ function setupToolControls(id) {
   }
 
   if (id === 'edit') {
-    const action = modalBody.querySelector('#editAction')
-    const update = () => {
-      modalBody.querySelector('#replaceTextFields').hidden = action.value !== 'replace-text'
-      modalBody.querySelector('#addTextFields').hidden = action.value !== 'add-text'
-      modalBody.querySelector('#rotateFields').hidden = action.value !== 'rotate'
-    }
-    action.addEventListener('change', update)
-    update()
+    setupVisualEditorControls()
   }
 
   if (id === 'sign') {
@@ -445,7 +465,621 @@ function setupToolControls(id) {
     })
   }
 
-  modalBody.querySelector('#processBtn').addEventListener('click', processCurrentTool)
+  const processBtn = modalBody.querySelector('#processBtn')
+  if (processBtn) processBtn.addEventListener('click', processCurrentTool)
+}
+
+
+function resetVisualEditorState() {
+  visualEditorState = {
+    doc: null,
+    sourceBytes: null,
+    pageIndex: 0,
+    zoom: 1.25,
+    mode: 'select',
+    operations: [],
+    undoStack: [],
+    redoStack: [],
+    selectedKey: null,
+    renderToken: visualEditorState.renderToken + 1,
+    currentViewport: null,
+    currentTextItems: []
+  }
+}
+
+function setupVisualEditorControls() {
+  const selectBtn = modalBody.querySelector('#veSelectMode')
+  const addBtn = modalBody.querySelector('#veAddTextMode')
+  const undoBtn = modalBody.querySelector('#veUndo')
+  const redoBtn = modalBody.querySelector('#veRedo')
+  const prevBtn = modalBody.querySelector('#vePrevPage')
+  const nextBtn = modalBody.querySelector('#veNextPage')
+  const zoomOut = modalBody.querySelector('#veZoomOut')
+  const zoomIn = modalBody.querySelector('#veZoomIn')
+  const saveBtn = modalBody.querySelector('#veSavePdf')
+  const stage = modalBody.querySelector('#veStage')
+
+  if (!selectBtn || !stage) return
+
+  selectBtn.addEventListener('click', () => setVisualEditorMode('select'))
+  addBtn.addEventListener('click', () => setVisualEditorMode('add-text'))
+  undoBtn.addEventListener('click', visualEditorUndo)
+  redoBtn.addEventListener('click', visualEditorRedo)
+
+  prevBtn.addEventListener('click', async () => {
+    if (!visualEditorState.doc) return
+    if (visualEditorState.pageIndex > 0) {
+      visualEditorState.pageIndex--
+      await renderVisualEditorPage()
+    }
+  })
+
+  nextBtn.addEventListener('click', async () => {
+    if (!visualEditorState.doc) return
+    if (visualEditorState.pageIndex < visualEditorState.doc.numPages - 1) {
+      visualEditorState.pageIndex++
+      await renderVisualEditorPage()
+    }
+  })
+
+  zoomOut.addEventListener('click', async () => {
+    visualEditorState.zoom = Math.max(0.6, Number((visualEditorState.zoom - 0.15).toFixed(2)))
+    await renderVisualEditorPage()
+  })
+
+  zoomIn.addEventListener('click', async () => {
+    visualEditorState.zoom = Math.min(2.5, Number((visualEditorState.zoom + 0.15).toFixed(2)))
+    await renderVisualEditorPage()
+  })
+
+  saveBtn.addEventListener('click', saveVisualEditorPdf)
+
+  stage.addEventListener('click', async event => {
+    if (visualEditorState.mode !== 'add-text' || !visualEditorState.currentViewport) return
+    if (event.target.closest('.visual-inline-editor')) return
+    if (event.target.closest('.visual-text-hit')) return
+
+    const rect = stage.getBoundingClientRect()
+    const vx = event.clientX - rect.left
+    const vy = event.clientY - rect.top
+    const point = visualEditorState.currentViewport.convertToPdfPoint(vx, vy)
+
+    const op = {
+      id: makeVisualOpId(),
+      type: 'addText',
+      pageIndex: visualEditorState.pageIndex,
+      x: point[0],
+      baselineY: point[1],
+      fontSize: 14,
+      text: 'Teks baru'
+    }
+
+    pushVisualHistory()
+    visualEditorState.operations.push(op)
+    visualEditorState.redoStack = []
+    updateVisualHistoryButtons()
+    renderVisualOperationLayer()
+    openInlineEditorForOperation(op, true)
+  })
+}
+
+function setVisualEditorMode(mode) {
+  visualEditorState.mode = mode
+  const selectBtn = modalBody.querySelector('#veSelectMode')
+  const addBtn = modalBody.querySelector('#veAddTextMode')
+  if (selectBtn) selectBtn.classList.toggle('active', mode === 'select')
+  if (addBtn) addBtn.classList.toggle('active', mode === 'add-text')
+
+  const help = modalBody.querySelector('#veHelp')
+  if (help) {
+    help.innerHTML = mode === 'add-text'
+      ? 'Klik area pada halaman untuk menambahkan teks baru. Setelah muncul, langsung ketik tulisan yang diinginkan.'
+      : 'Klik tulisan pada PDF untuk mengubahnya langsung. Kotak edit akan muncul tepat di posisi teks tersebut.'
+  }
+}
+
+async function launchVisualEditor(file) {
+  const editor = modalBody.querySelector('#visualEditor')
+  const intro = modalBody.querySelector('#visualEditorIntro')
+  if (!editor) return
+
+  resetVisualEditorState()
+  setStatus('Membuka Visual PDF Editor…')
+
+  const raw = await file.arrayBuffer()
+  visualEditorState.sourceBytes = new Uint8Array(raw.slice(0))
+  const bytesForPdfJs = new Uint8Array(raw.slice(0))
+  visualEditorState.doc = await pdfjsLib.getDocument({ data: bytesForPdfJs }).promise
+  visualEditorState.pageIndex = 0
+
+  editor.hidden = false
+  if (intro) intro.hidden = true
+  statusBox.hidden = true
+
+  await renderVisualThumbnails()
+  await renderVisualEditorPage()
+  setVisualEditorMode('select')
+  updateVisualHistoryButtons()
+
+  setVisualFooterStatus('PDF siap diedit. Klik teks pada halaman.')
+}
+
+async function renderVisualThumbnails() {
+  const box = modalBody.querySelector('#veThumbnails')
+  if (!box || !visualEditorState.doc) return
+  box.innerHTML = ''
+
+  const total = visualEditorState.doc.numPages
+  for (let i = 0; i < total; i++) {
+    const page = await visualEditorState.doc.getPage(i + 1)
+    const viewport = page.getViewport({ scale: 0.19 })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.ceil(viewport.width)
+    canvas.height = Math.ceil(viewport.height)
+    const ctx = canvas.getContext('2d', { alpha: false })
+    await page.render({ canvasContext: ctx, viewport }).promise
+
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = 'visual-thumb'
+    item.dataset.pageIndex = String(i)
+    item.innerHTML = '<div class="visual-thumb-canvas"></div><span>Hal. ' + (i + 1) + '</span>'
+    item.querySelector('.visual-thumb-canvas').appendChild(canvas)
+
+    item.addEventListener('click', async () => {
+      visualEditorState.pageIndex = i
+      await renderVisualEditorPage()
+    })
+    box.appendChild(item)
+  }
+  updateVisualThumbnailSelection()
+}
+
+function updateVisualThumbnailSelection() {
+  const thumbs = modalBody.querySelectorAll('.visual-thumb')
+  for (let i = 0; i < thumbs.length; i++) {
+    thumbs[i].classList.toggle(
+      'active',
+      Number(thumbs[i].dataset.pageIndex) === visualEditorState.pageIndex
+    )
+  }
+}
+
+async function renderVisualEditorPage() {
+  if (!visualEditorState.doc) return
+  const token = ++visualEditorState.renderToken
+
+  closeVisualInlineEditor(false)
+
+  const page = await visualEditorState.doc.getPage(visualEditorState.pageIndex + 1)
+  if (token !== visualEditorState.renderToken) return
+
+  const viewport = page.getViewport({ scale: visualEditorState.zoom })
+  visualEditorState.currentViewport = viewport
+
+  const canvas = modalBody.querySelector('#veCanvas')
+  const stage = modalBody.querySelector('#veStage')
+  const textLayer = modalBody.querySelector('#veTextLayer')
+  const opsLayer = modalBody.querySelector('#veOpsLayer')
+  const inlineLayer = modalBody.querySelector('#veInlineLayer')
+
+  canvas.width = Math.ceil(viewport.width)
+  canvas.height = Math.ceil(viewport.height)
+  canvas.style.width = viewport.width + 'px'
+  canvas.style.height = viewport.height + 'px'
+  stage.style.width = viewport.width + 'px'
+  stage.style.height = viewport.height + 'px'
+  textLayer.style.width = viewport.width + 'px'
+  textLayer.style.height = viewport.height + 'px'
+  opsLayer.style.width = viewport.width + 'px'
+  opsLayer.style.height = viewport.height + 'px'
+  inlineLayer.style.width = viewport.width + 'px'
+  inlineLayer.style.height = viewport.height + 'px'
+
+  const ctx = canvas.getContext('2d', { alpha: false })
+  await page.render({ canvasContext: ctx, viewport }).promise
+  if (token !== visualEditorState.renderToken) return
+
+  const content = await getTextContentCompat(page)
+  if (token !== visualEditorState.renderToken) return
+  visualEditorState.currentTextItems = content && content.items ? content.items : []
+
+  renderVisualTextHitLayer()
+  renderVisualOperationLayer()
+  updateVisualEditorToolbar()
+  updateVisualThumbnailSelection()
+}
+
+function renderVisualTextHitLayer() {
+  const layer = modalBody.querySelector('#veTextLayer')
+  const viewport = visualEditorState.currentViewport
+  if (!layer || !viewport) return
+  layer.innerHTML = ''
+
+  const items = visualEditorState.currentTextItems || []
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (!item || typeof item.str !== 'string' || !item.str.trim()) continue
+
+    const tr = item.transform || [1, 0, 0, 12, 0, 0]
+    const x = Number(tr[4]) || 0
+    const baselineY = Number(tr[5]) || 0
+    const pdfFontSize = Math.max(
+      5,
+      Math.min(
+        72,
+        Math.abs(Number(tr[3]) || 0) ||
+        Math.abs(Number(item.height) || 0) ||
+        12
+      )
+    )
+    const p = viewport.convertToViewportPoint(x, baselineY)
+    const width = Math.max((Number(item.width) || pdfFontSize * item.str.length * 0.45) * visualEditorState.zoom, 5)
+    const height = Math.max(pdfFontSize * visualEditorState.zoom * 1.18, 8)
+    const top = p[1] - height * 0.82
+    const key = visualEditorState.pageIndex + ':' + i
+
+    const hit = document.createElement('button')
+    hit.type = 'button'
+    hit.className = 'visual-text-hit'
+    hit.dataset.sourceKey = key
+    hit.title = item.str
+    hit.style.left = p[0] + 'px'
+    hit.style.top = top + 'px'
+    hit.style.width = width + 'px'
+    hit.style.height = height + 'px'
+
+    hit.addEventListener('click', event => {
+      event.stopPropagation()
+      if (visualEditorState.mode !== 'select') return
+      openInlineEditorForTextItem(item, i, hit)
+    })
+
+    layer.appendChild(hit)
+  }
+}
+
+function findVisualOperationByKey(sourceKey) {
+  for (let i = visualEditorState.operations.length - 1; i >= 0; i--) {
+    const op = visualEditorState.operations[i]
+    if (op.sourceKey === sourceKey) return op
+  }
+  return null
+}
+
+function openInlineEditorForTextItem(item, itemIndex, hitElement) {
+  closeVisualInlineEditor(false)
+
+  const sourceKey = visualEditorState.pageIndex + ':' + itemIndex
+  const existing = findVisualOperationByKey(sourceKey)
+  const tr = item.transform || [1, 0, 0, 12, 0, 0]
+  const fontSize = Math.max(
+    5,
+    Math.min(72, Math.abs(Number(tr[3]) || 0) || Math.abs(Number(item.height) || 0) || 12)
+  )
+
+  const op = existing || {
+    id: makeVisualOpId(),
+    type: 'replaceText',
+    pageIndex: visualEditorState.pageIndex,
+    sourceKey: sourceKey,
+    x: Number(tr[4]) || 0,
+    baselineY: Number(tr[5]) || 0,
+    width: Math.max(Number(item.width) || 1, 1),
+    height: Math.max(Number(item.height) || fontSize, fontSize),
+    fontSize: fontSize,
+    oldText: item.str,
+    text: item.str
+  }
+
+  visualEditorState.selectedKey = sourceKey
+  const layer = modalBody.querySelector('#veInlineLayer')
+  const rect = hitElement.getBoundingClientRect()
+  const stageRect = modalBody.querySelector('#veStage').getBoundingClientRect()
+
+  const editor = document.createElement('div')
+  editor.className = 'visual-inline-editor'
+  editor.dataset.opId = op.id
+  editor.style.left = (rect.left - stageRect.left) + 'px'
+  editor.style.top = (rect.top - stageRect.top) + 'px'
+  editor.style.minWidth = Math.max(rect.width, 90) + 'px'
+  editor.style.height = Math.max(rect.height + 8, 30) + 'px'
+
+  editor.innerHTML = `
+    <input class="visual-inline-input" type="text" value="${escapeHtmlAttribute(existing ? existing.text : item.str)}" aria-label="Edit teks PDF">
+    <div class="visual-inline-actions">
+      <button type="button" data-inline-save>Simpan</button>
+      <button type="button" data-inline-delete>Hapus</button>
+      <button type="button" data-inline-cancel>Batal</button>
+    </div>
+  `
+  layer.appendChild(editor)
+
+  const input = editor.querySelector('.visual-inline-input')
+  input.style.fontSize = Math.max(11, fontSize * visualEditorState.zoom) + 'px'
+  input.focus()
+  input.select()
+
+  const commit = value => {
+    const current = findVisualOperationByKey(sourceKey)
+    pushVisualHistory()
+
+    if (current) {
+      current.text = value
+    } else {
+      op.text = value
+      visualEditorState.operations.push(op)
+    }
+
+    visualEditorState.redoStack = []
+    updateVisualHistoryButtons()
+    closeVisualInlineEditor(false)
+    renderVisualOperationLayer()
+    setVisualFooterStatus('Perubahan teks belum disimpan ke file. Klik “Simpan PDF” jika sudah selesai.')
+  }
+
+  editor.querySelector('[data-inline-save]').addEventListener('click', () => commit(input.value))
+  editor.querySelector('[data-inline-delete]').addEventListener('click', () => commit(''))
+  editor.querySelector('[data-inline-cancel]').addEventListener('click', () => closeVisualInlineEditor(false))
+
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      commit(input.value)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      closeVisualInlineEditor(false)
+    }
+  })
+}
+
+function openInlineEditorForOperation(op, selectAll) {
+  closeVisualInlineEditor(false)
+  const viewport = visualEditorState.currentViewport
+  if (!viewport) return
+
+  const p = viewport.convertToViewportPoint(op.x, op.baselineY)
+  const layer = modalBody.querySelector('#veInlineLayer')
+  const editor = document.createElement('div')
+  editor.className = 'visual-inline-editor'
+  editor.dataset.opId = op.id
+  editor.style.left = p[0] + 'px'
+  editor.style.top = (p[1] - op.fontSize * visualEditorState.zoom) + 'px'
+  editor.style.minWidth = '150px'
+  editor.style.height = Math.max(34, op.fontSize * visualEditorState.zoom * 1.5) + 'px'
+  editor.innerHTML = `
+    <input class="visual-inline-input" type="text" value="${escapeHtmlAttribute(op.text)}" aria-label="Tambah teks PDF">
+    <div class="visual-inline-actions">
+      <button type="button" data-inline-save>Simpan</button>
+      <button type="button" data-inline-delete>Hapus</button>
+      <button type="button" data-inline-cancel>Batal</button>
+    </div>
+  `
+  layer.appendChild(editor)
+
+  const input = editor.querySelector('.visual-inline-input')
+  input.style.fontSize = Math.max(11, op.fontSize * visualEditorState.zoom) + 'px'
+  input.focus()
+  if (selectAll) input.select()
+
+  const commit = value => {
+    const target = findVisualOperationById(op.id)
+    if (!target) return
+    pushVisualHistory()
+    target.text = value
+    visualEditorState.redoStack = []
+    updateVisualHistoryButtons()
+    closeVisualInlineEditor(false)
+    renderVisualOperationLayer()
+    setVisualFooterStatus('Teks tambahan belum disimpan ke file. Klik “Simpan PDF” jika sudah selesai.')
+  }
+
+  editor.querySelector('[data-inline-save]').addEventListener('click', () => commit(input.value))
+  editor.querySelector('[data-inline-delete]').addEventListener('click', () => {
+    pushVisualHistory()
+    visualEditorState.operations = visualEditorState.operations.filter(x => x.id !== op.id)
+    visualEditorState.redoStack = []
+    updateVisualHistoryButtons()
+    closeVisualInlineEditor(false)
+    renderVisualOperationLayer()
+  })
+  editor.querySelector('[data-inline-cancel]').addEventListener('click', () => closeVisualInlineEditor(false))
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      commit(input.value)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      closeVisualInlineEditor(false)
+    }
+  })
+}
+
+function closeVisualInlineEditor(commitOnClose) {
+  const layer = modalBody.querySelector('#veInlineLayer')
+  if (layer) layer.innerHTML = ''
+  visualEditorState.selectedKey = null
+}
+
+function findVisualOperationById(id) {
+  for (let i = 0; i < visualEditorState.operations.length; i++) {
+    if (visualEditorState.operations[i].id === id) return visualEditorState.operations[i]
+  }
+  return null
+}
+
+function renderVisualOperationLayer() {
+  const layer = modalBody.querySelector('#veOpsLayer')
+  const viewport = visualEditorState.currentViewport
+  if (!layer || !viewport) return
+  layer.innerHTML = ''
+
+  const pageOps = visualEditorState.operations.filter(op => op.pageIndex === visualEditorState.pageIndex)
+  for (let i = 0; i < pageOps.length; i++) {
+    const op = pageOps[i]
+    const p = viewport.convertToViewportPoint(op.x, op.baselineY)
+
+    if (op.type === 'replaceText') {
+      const box = document.createElement('div')
+      box.className = 'visual-op visual-op-replace'
+      box.style.left = (p[0] - 1) + 'px'
+      box.style.top = (p[1] - op.height * visualEditorState.zoom * 0.86) + 'px'
+      box.style.minWidth = Math.max(op.width * visualEditorState.zoom + 4, 8) + 'px'
+      box.style.height = Math.max(op.height * visualEditorState.zoom * 1.18, 10) + 'px'
+      box.style.fontSize = Math.max(6, op.fontSize * visualEditorState.zoom) + 'px'
+      box.textContent = op.text
+      layer.appendChild(box)
+    } else if (op.type === 'addText') {
+      const box = document.createElement('div')
+      box.className = 'visual-op visual-op-add'
+      box.style.left = p[0] + 'px'
+      box.style.top = (p[1] - op.fontSize * visualEditorState.zoom) + 'px'
+      box.style.fontSize = Math.max(6, op.fontSize * visualEditorState.zoom) + 'px'
+      box.textContent = op.text
+      box.addEventListener('click', event => {
+        event.stopPropagation()
+        if (visualEditorState.mode === 'select') openInlineEditorForOperation(op, false)
+      })
+      layer.appendChild(box)
+    }
+  }
+}
+
+function makeVisualOpId() {
+  return 'op-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+}
+
+function cloneVisualOperations() {
+  return JSON.parse(JSON.stringify(visualEditorState.operations))
+}
+
+function pushVisualHistory() {
+  visualEditorState.undoStack.push(cloneVisualOperations())
+  if (visualEditorState.undoStack.length > 50) visualEditorState.undoStack.shift()
+}
+
+async function visualEditorUndo() {
+  if (!visualEditorState.undoStack.length) return
+  visualEditorState.redoStack.push(cloneVisualOperations())
+  visualEditorState.operations = visualEditorState.undoStack.pop()
+  closeVisualInlineEditor(false)
+  renderVisualOperationLayer()
+  updateVisualHistoryButtons()
+  setVisualFooterStatus('Undo diterapkan.')
+}
+
+async function visualEditorRedo() {
+  if (!visualEditorState.redoStack.length) return
+  visualEditorState.undoStack.push(cloneVisualOperations())
+  visualEditorState.operations = visualEditorState.redoStack.pop()
+  closeVisualInlineEditor(false)
+  renderVisualOperationLayer()
+  updateVisualHistoryButtons()
+  setVisualFooterStatus('Redo diterapkan.')
+}
+
+function updateVisualHistoryButtons() {
+  const undo = modalBody.querySelector('#veUndo')
+  const redo = modalBody.querySelector('#veRedo')
+  if (undo) undo.disabled = !visualEditorState.undoStack.length
+  if (redo) redo.disabled = !visualEditorState.redoStack.length
+}
+
+function updateVisualEditorToolbar() {
+  const info = modalBody.querySelector('#vePageInfo')
+  const zoom = modalBody.querySelector('#veZoomLabel')
+  const prev = modalBody.querySelector('#vePrevPage')
+  const next = modalBody.querySelector('#veNextPage')
+  if (info && visualEditorState.doc) {
+    info.textContent = 'Hal. ' + (visualEditorState.pageIndex + 1) + ' / ' + visualEditorState.doc.numPages
+  }
+  if (zoom) zoom.textContent = Math.round(visualEditorState.zoom * 100) + '%'
+  if (prev) prev.disabled = visualEditorState.pageIndex <= 0
+  if (next && visualEditorState.doc) next.disabled = visualEditorState.pageIndex >= visualEditorState.doc.numPages - 1
+}
+
+function setVisualFooterStatus(text) {
+  const el = modalBody.querySelector('#veStatus')
+  if (el) el.textContent = text
+}
+
+async function saveVisualEditorPdf() {
+  if (!visualEditorState.sourceBytes) return
+  closeVisualInlineEditor(false)
+
+  const saveBtn = modalBody.querySelector('#veSavePdf')
+  if (saveBtn) {
+    saveBtn.disabled = true
+    saveBtn.textContent = 'Menyimpan…'
+  }
+
+  try {
+    setVisualFooterStatus('Menerapkan perubahan ke PDF…')
+    const sourceCopy = new Uint8Array(visualEditorState.sourceBytes)
+    const pdf = await PDFDocument.load(sourceCopy)
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+
+    for (let i = 0; i < visualEditorState.operations.length; i++) {
+      const op = visualEditorState.operations[i]
+      const page = pdf.getPage(op.pageIndex)
+
+      if (op.type === 'replaceText') {
+        let drawSize = op.fontSize
+        let replacementWidth = op.text ? font.widthOfTextAtSize(op.text, drawSize) : 0
+        if (op.text && replacementWidth > op.width) {
+          drawSize = Math.max(5, drawSize * (op.width / replacementWidth))
+          replacementWidth = font.widthOfTextAtSize(op.text, drawSize)
+        }
+
+        page.drawRectangle({
+          x: Math.max(0, op.x - 1.5),
+          y: Math.max(0, op.baselineY - op.height * 0.25),
+          width: Math.max(op.width + 3, replacementWidth + 3),
+          height: Math.max(op.height * 1.2, op.fontSize * 1.2),
+          color: rgb(1, 1, 1)
+        })
+
+        if (op.text) {
+          page.drawText(op.text, {
+            x: op.x,
+            y: op.baselineY,
+            size: drawSize,
+            font: font,
+            color: rgb(0, 0, 0)
+          })
+        }
+      } else if (op.type === 'addText' && op.text) {
+        page.drawText(op.text, {
+          x: op.x,
+          y: op.baselineY,
+          size: op.fontSize,
+          font: font,
+          color: rgb(0, 0, 0)
+        })
+      }
+    }
+
+    const saved = await pdf.save()
+    const sourceName = activeFiles[0] ? activeFiles[0].name : 'dokumen.pdf'
+    downloadBytes(saved, `${stripExt(sourceName)}-edit-visual.pdf`, 'application/pdf')
+    setVisualFooterStatus('Selesai. PDF hasil edit sudah dibuat.')
+  } catch (error) {
+    console.error(error)
+    setVisualFooterStatus('Gagal menyimpan: ' + (error && error.message ? error.message : String(error)))
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false
+      saveBtn.textContent = 'Simpan PDF'
+    }
+  }
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 async function renderPdfPreview(file, maxPages=16, reorderMode=false) {
@@ -565,6 +1199,9 @@ function closeModal() {
   activeFiles = []
   reorderedPages = []
   thumbnailGeneration++
+  resetVisualEditorState()
+  const modalCard = document.querySelector('.modal-card')
+  if (modalCard) modalCard.classList.remove('visual-mode')
 }
 
 document.querySelectorAll('[data-close-modal]').forEach(el => el.addEventListener('click', closeModal))

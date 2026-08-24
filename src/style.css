@@ -59,3 +59,242 @@ footer{border-top:1px solid #e2e6ef;padding:26px 24px;display:flex;gap:12px;just
 
 @media(max-width:850px){.tools-grid{grid-template-columns:repeat(2,1fr)}.hero{padding:34px}.info-panel{grid-template-columns:1fr}}
 @media(max-width:570px){.topbar{height:auto;padding:13px 16px}.privacy-badge{display:none}main{padding:24px 14px 50px}.hero{padding:28px 22px;border-radius:20px}.hero h1{font-size:36px}.toolbar{grid-template-columns:1fr}.tools-grid{grid-template-columns:1fr}.modal-card{padding:20px}.modal-head{padding-right:34px}.form-grid{grid-template-columns:1fr}.span-2{grid-column:auto}footer{flex-direction:column;align-items:center;text-align:center}}
+
+
+/* ===== Visual PDF Editor v4 ===== */
+.modal-card.visual-mode{
+  width:min(1500px,98vw);
+  height:94vh;
+  max-height:94vh;
+  padding:20px;
+  overflow:auto;
+}
+.modal-card.visual-mode .modal-head{margin-bottom:10px}
+.modal-card.visual-mode .drop-zone{min-height:92px;flex-direction:row;gap:12px}
+.modal-card.visual-mode .upload-symbol{margin:0}
+.visual-editor{
+  border:1px solid #dde2ec;
+  border-radius:16px;
+  overflow:hidden;
+  background:#eef1f6;
+  margin-top:12px;
+}
+.visual-editor-toolbar{
+  min-height:56px;
+  padding:8px 10px;
+  background:white;
+  border-bottom:1px solid #dfe3eb;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  position:sticky;
+  top:0;
+  z-index:20;
+}
+.visual-toolbar-group{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  padding-right:10px;
+  border-right:1px solid #e5e7ed;
+}
+.visual-toolbar-spacer{flex:1}
+.ve-tool,.ve-icon-btn,.ve-save-btn{
+  border:1px solid #d9dde7;
+  background:white;
+  color:#30394c;
+  min-height:38px;
+  border-radius:9px;
+  font-weight:700;
+}
+.ve-tool{padding:0 11px;display:flex;align-items:center;gap:6px}
+.ve-tool.active{background:#eeedff;border-color:#7b72f2;color:#4f46d9}
+.ve-icon-btn{min-width:38px;padding:0 10px;font-size:18px}
+.ve-icon-btn:disabled{opacity:.38;cursor:not-allowed}
+.ve-save-btn{
+  padding:0 18px;
+  background:#5c54e8;
+  color:white;
+  border-color:#5c54e8;
+}
+.ve-save-btn:disabled{opacity:.55}
+.ve-page-info,.ve-zoom-label{font-size:12px;font-weight:800;color:#596174;min-width:72px;text-align:center}
+.visual-editor-main{
+  display:grid;
+  grid-template-columns:150px minmax(0,1fr);
+  height:calc(94vh - 290px);
+  min-height:470px;
+}
+.visual-sidebar{
+  background:#f8f9fc;
+  border-right:1px solid #dfe3eb;
+  padding:10px;
+  overflow:auto;
+}
+.visual-sidebar-title{
+  font-size:10px;
+  letter-spacing:.12em;
+  color:#8a92a5;
+  font-weight:900;
+  margin:2px 2px 9px;
+}
+.visual-thumbnails{display:grid;gap:9px}
+.visual-thumb{
+  border:1px solid transparent;
+  background:transparent;
+  padding:6px;
+  border-radius:10px;
+  color:#626b7e;
+  font-size:11px;
+  text-align:center;
+}
+.visual-thumb:hover{background:#f0f1f6}
+.visual-thumb.active{background:#ecebff;border-color:#aaa4ff;color:#4e46d6}
+.visual-thumb-canvas{
+  min-height:80px;
+  display:grid;
+  place-items:center;
+  background:white;
+  border-radius:6px;
+  box-shadow:0 1px 5px #00000012;
+  overflow:hidden;
+  margin-bottom:5px;
+}
+.visual-thumb canvas{display:block;max-width:100%;height:auto}
+.visual-workspace{display:flex;flex-direction:column;min-width:0;background:#dfe3ea}
+.visual-help{
+  background:#fffdf2;
+  border-bottom:1px solid #e6dfbd;
+  color:#75692f;
+  padding:8px 12px;
+  font-size:12px;
+  line-height:1.45;
+}
+.visual-stage-scroll{
+  flex:1;
+  overflow:auto;
+  padding:28px;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+}
+.visual-stage{
+  position:relative;
+  background:white;
+  box-shadow:0 10px 35px #2732462b;
+  flex:none;
+}
+#veCanvas{display:block}
+.visual-text-layer,
+.visual-ops-layer,
+.visual-inline-layer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+.visual-text-layer{z-index:4}
+.visual-ops-layer{z-index:6}
+.visual-inline-layer{z-index:10}
+.visual-text-hit{
+  position:absolute;
+  display:block;
+  padding:0;
+  margin:0;
+  border:1px solid transparent;
+  background:transparent;
+  pointer-events:auto;
+  border-radius:2px;
+  cursor:text;
+}
+.visual-text-hit:hover{
+  border-color:#6c63ef;
+  background:#756cff16;
+  box-shadow:0 0 0 1px #ffffff88 inset;
+}
+.visual-op{
+  position:absolute;
+  background:white;
+  color:#111;
+  white-space:nowrap;
+  line-height:1;
+  font-family:Arial,Helvetica,sans-serif;
+}
+.visual-op-replace{
+  display:flex;
+  align-items:flex-end;
+  overflow:visible;
+  pointer-events:none;
+}
+.visual-op-add{
+  padding:1px 2px;
+  border:1px dashed #786ef0;
+  pointer-events:auto;
+  cursor:text;
+}
+.visual-inline-editor{
+  position:absolute;
+  pointer-events:auto;
+  z-index:20;
+  display:flex;
+  align-items:stretch;
+  background:white;
+  border:2px solid #655ce9;
+  border-radius:7px;
+  box-shadow:0 10px 28px #2c2f4c33;
+  min-height:32px;
+}
+.visual-inline-input{
+  min-width:100px;
+  width:100%;
+  border:0;
+  outline:0;
+  background:white;
+  color:#111;
+  padding:2px 7px;
+  line-height:1.1;
+  font-family:Arial,Helvetica,sans-serif;
+}
+.visual-inline-actions{
+  position:absolute;
+  top:calc(100% + 5px);
+  left:0;
+  display:flex;
+  gap:4px;
+  padding:4px;
+  background:#20263a;
+  border-radius:8px;
+  box-shadow:0 7px 20px #0003;
+  white-space:nowrap;
+}
+.visual-inline-actions button{
+  border:0;
+  color:white;
+  background:#343c55;
+  border-radius:5px;
+  padding:5px 8px;
+  font-size:10px;
+  font-weight:700;
+}
+.visual-inline-actions button:first-child{background:#6157e6}
+.visual-inline-actions button:nth-child(2){background:#9d4343}
+.visual-editor-footer{
+  min-height:38px;
+  background:white;
+  border-top:1px solid #dfe3eb;
+  padding:8px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:11px;
+  color:#7b8396;
+}
+.visual-editor-footer #veStatus{font-weight:700;color:#596176}
+@media(max-width:850px){
+  .modal-card.visual-mode{width:99vw;height:96vh;max-height:96vh}
+  .visual-editor-main{grid-template-columns:92px minmax(0,1fr);height:calc(96vh - 310px)}
+  .visual-stage-scroll{padding:15px}
+  .ve-tool span{display:none}
+  .visual-editor-footer{align-items:flex-start;flex-direction:column}
+}
