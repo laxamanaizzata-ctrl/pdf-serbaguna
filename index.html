@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Konversi dan kelola PDF langsung di browser. File diproses lokal di perangkat." />
+    <title>PDF Serbaguna v2</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="#" class="brand" aria-label="PDF Serbaguna">
+        <span class="brand-mark">P</span>
+        <span>
+          <strong>PDF Serbaguna</strong>
+          <small>Gratis • Lokal • Tanpa upload server</small>
+        </span>
+      </a>
+      <div class="privacy-badge">🔒 File tetap di perangkat</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <div class="eyebrow">PDF SERBAGUNA • VERSI 2</div>
+          <h1>Konversi, atur, edit, dan amankan PDF dalam satu web.</h1>
+          <p>
+            Office ke PDF, PDF ke Word/JPG/Excel, drag-and-drop, preview halaman,
+            merge, split rentang, kompres, watermark, nomor halaman, tanda tangan,
+            pengaturan halaman, dan password — langsung dari browser.
+          </p>
+          <div class="hero-pills">
+            <span>✓ Gratis</span><span>✓ Tanpa akun</span><span>✓ Pemrosesan lokal</span><span>✓ Preview visual</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="toolbar">
+        <input id="searchTool" type="search" placeholder="Cari alat, misalnya kompres PDF..." autocomplete="off" />
+        <select id="categoryFilter">
+          <option value="all">Semua kategori</option>
+          <option value="convert">Konversi</option>
+          <option value="organize">Kelola PDF</option>
+          <option value="edit">Edit & Tambahkan</option>
+          <option value="security">Keamanan</option>
+        </select>
+      </section>
+
+      <section id="toolsGrid" class="tools-grid"></section>
+
+      <section class="info-panel">
+        <div>
+          <h2>Privasi sebagai default</h2>
+          <p>Dokumen diproses di browser. Web ini tidak membutuhkan akun, database dokumen, atau endpoint upload file.</p>
+        </div>
+        <div>
+          <h2>Catatan kompatibilitas</h2>
+          <p>PDF → Word/Excel adalah rekonstruksi. PDF scan dan tata letak sangat kompleks bisa memerlukan OCR atau koreksi manual.</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="modal" class="modal" hidden>
+      <div class="modal-backdrop" data-close-modal></div>
+      <section class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <button class="modal-close" data-close-modal aria-label="Tutup">×</button>
+        <div class="modal-head">
+          <div class="modal-icon" id="modalIcon"></div>
+          <div>
+            <h2 id="modalTitle"></h2>
+            <p id="modalDescription" class="modal-description"></p>
+          </div>
+        </div>
+        <div id="modalBody"></div>
+        <div id="status" class="status" hidden></div>
+      </section>
+    </div>
+
+    <footer>
+      <strong>PDF Serbaguna v2</strong>
+      <span>Semua proses utama dirancang berjalan lokal di browser.</span>
+    </footer>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

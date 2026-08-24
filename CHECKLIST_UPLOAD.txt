@@ -1,0 +1,9 @@
+CHECKLIST DEPLOY PDF SERBAGUNA
+
+[ ] Buat repository GitHub PUBLIC bernama pdf-serbaguna
+[ ] Upload SEMUA isi folder ini, termasuk .github
+[ ] Pastikan branch utama bernama main
+[ ] Settings > Pages > Source = GitHub Actions
+[ ] Buka tab Actions dan tunggu deployment sukses
+[ ] Buka URL https://USERNAME.github.io/pdf-serbaguna/
+[ ] Uji JPG ke PDF dan Gabung PDF terlebih dahulu

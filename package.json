@@ -1,0 +1,22 @@
+{
+  "name": "pdf-serbaguna-web",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108",
+    "pdfstudio": "^0.4.0",
+    "reamkit": "latest",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  }
+}
